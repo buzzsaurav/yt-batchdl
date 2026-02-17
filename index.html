@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bulk Media Downloader (Lite)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+
+<body class="bg-slate-900 text-slate-100 min-h-screen p-4 md:p-8">
+    <div class="max-w-4xl mx-auto">
+        <header class="mb-8 text-center">
+            <h1
+                class="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500 mb-2">
+                Bulk Media Downloader
+            </h1>
+            <p class="text-slate-400">Paste YouTube URLs and download in bulk (MP3 or MP4)</p>
+        </header>
+
+        <main class="grid gap-8">
+            <!-- Input Card -->
+            <div class="bg-slate-800 rounded-xl p-6 shadow-xl border border-slate-700">
+                <div class="mb-4">
+                    <label for="urls" class="block text-sm font-medium mb-2 text-slate-300">YouTube URLs (one per
+                        line)</label>
+                    <textarea id="urls" rows="6"
+                        class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                        placeholder="https://www.youtube.com/watch?v=...&#10;https://youtu.be/..."></textarea>
+                </div>
+
+                <div class="flex flex-col md:flex-row items-center justify-between gap-4">
+                    <div class="flex flex-col md:flex-row items-center gap-6 w-full">
+                        <div class="flex items-center space-x-6">
+                            <span class="text-sm font-medium text-slate-300 whitespace-nowrap">Format:</span>
+                            <div class="flex items-center space-x-4">
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="radio" name="format" value="mp3" checked class="hidden peer">
+                                    <span
+                                        class="px-4 py-2 rounded-lg bg-slate-700 peer-checked:bg-blue-600 peer-checked:text-white transition-all text-sm">MP3</span>
+                                </label>
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="radio" name="format" value="video" class="hidden peer">
+                                    <span
+                                        class="px-4 py-2 rounded-lg bg-slate-700 peer-checked:bg-blue-600 peer-checked:text-white transition-all text-sm">MP4</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="flex-1 w-full flex flex-col md:flex-row gap-4">
+                            <div class="relative flex-1">
+                                <span
+                                    class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs font-bold uppercase tracking-wider">Folder:</span>
+                                <input type="text" id="folder"
+                                    class="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 pl-20 pr-3 text-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all text-sm"
+                                    placeholder="Optional subfolder">
+                            </div>
+                            <div class="relative flex-1">
+                                <span
+                                    class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs font-bold uppercase tracking-wider">Proxy:</span>
+                                <input type="text" id="proxy"
+                                    class="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 pl-20 pr-3 text-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all text-sm"
+                                    placeholder="e.g. http://12.34.56.78:8080">
+                            </div>
+                        </div>
+                    </div>
+                    <button id="start-btn"
+                        class="w-full md:w-auto px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold rounded-lg shadow-lg transform hover:scale-105 transition-all">
+                        Start Download
+                    </button>
+                </div>
+            </div>
+
+            <!-- Progress Section -->
+            <div class="space-y-4">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-xl font-semibold">Downloads</h2>
+                    <button id="clear-btn" class="text-sm text-slate-400 hover:text-white transition-colors">Clear
+                        Finished</button>
+                </div>
+                <div id="progress-container" class="grid gap-4">
+                    <!-- Progress Card Placeholder -->
+                    <div id="empty-state"
+                        class="text-center py-12 bg-slate-800/50 rounded-xl border border-dashed border-slate-700 text-slate-500">
+                        No active downloads. Paste URLs above to get started.
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const urlsTextarea = document.getElementById('urls');
+        const startBtn = document.getElementById('start-btn');
+        const clearBtn = document.getElementById('clear-btn');
+        const progressContainer = document.getElementById('progress-container');
+        const emptyState = document.getElementById('empty-state');
+
+        let eventSource = null;
+        const activeDownloads = new Map();
+
+        function createProgressCard(urlId, title = 'Waiting...') {
+            if (activeDownloads.has(urlId)) return activeDownloads.get(urlId);
+
+            if (emptyState) emptyState.remove();
+
+            const card = document.createElement('div');
+            card.id = `card-${btoa(urlId).replace(/=/g, '')}`;
+            card.className = "bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg animate-fade-in";
+            card.innerHTML = `
+                <div class="flex justify-between items-start mb-3">
+                    <div class="flex-1">
+                        <h3 class="font-medium text-slate-200 line-clamp-1 title-el">${title}</h3>
+                        <p class="text-xs text-slate-400 truncate">${urlId}</p>
+                    </div>
+                    <span class="text-xs font-bold px-2 py-1 rounded bg-slate-700 status-el">Queued</span>
+                </div>
+                <div class="w-full bg-slate-900 rounded-full h-2 mb-2 overflow-hidden">
+                    <div class="progress-bar bg-blue-500 h-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+                <div class="flex justify-between text-xs text-slate-400">
+                    <span class="speed-el">0 KB/s</span>
+                    <span class="eta-el">ETA: --:--</span>
+                    <span class="percent-el">0%</span>
+                </div>
+            `;
+            progressContainer.prepend(card);
+
+            const state = {
+                card,
+                titleEl: card.querySelector('.title-el'),
+                statusEl: card.querySelector('.status-el'),
+                progressEl: card.querySelector('.progress-bar'),
+                speedEl: card.querySelector('.speed-el'),
+                etaEl: card.querySelector('.eta-el'),
+                percentEl: card.querySelector('.percent-el'),
+                finished: false
+            };
+            activeDownloads.set(urlId, state);
+            return state;
+        }
+
+        function updateProgressCard(data) {
+            const state = createProgressCard(data.url_id);
+            if (state.finished) return;
+
+            state.titleEl.textContent = data.title || 'Unknown';
+            state.statusEl.textContent = data.status;
+            state.percentEl.textContent = `${data.progress || 0}%`;
+            state.progressEl.style.width = `${data.progress || 0}%`;
+            state.speedEl.textContent = data.speed || 'N/A';
+            state.etaEl.textContent = `ETA: ${data.eta || '--:--'}`;
+
+            if (data.status === 'Finished') {
+                state.statusEl.classList.remove('bg-slate-700');
+                state.statusEl.classList.add('bg-green-600', 'text-white');
+                state.progressEl.classList.remove('bg-blue-500');
+                state.progressEl.classList.add('bg-green-500');
+                state.finished = true;
+            } else if (data.status.startsWith('Error')) {
+                state.statusEl.classList.add('bg-red-600', 'text-white');
+                state.progressEl.classList.add('bg-red-500');
+            }
+        }
+
+        function initSSE() {
+            if (eventSource) return;
+            eventSource = new EventSource('/events');
+            eventSource.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                updateProgressCard(data);
+            };
+            eventSource.onerror = () => {
+                console.error("SSE connection lost. Reconnecting...");
+            };
+        }
+
+        startBtn.addEventListener('click', async () => {
+            const urls = urlsTextarea.value.split('\n').filter(u => u.trim());
+            if (urls.length === 0) return alert('Please enter at least one URL');
+
+            const format = document.querySelector('input[name="format"]:checked').value;
+            const folder = document.getElementById('folder').value.trim();
+            const proxy = document.getElementById('proxy').value.trim();
+
+            startBtn.disabled = true;
+            startBtn.textContent = 'Starting...';
+
+            try {
+                const response = await fetch('/download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ urls, format, folder, proxy })
+                });
+
+                if (response.ok) {
+                    initSSE();
+                    urlsTextarea.value = '';
+                } else {
+                    alert('Failed to start download');
+                }
+            } catch (error) {
+                console.error(error);
+                alert('An error occurred');
+            } finally {
+                startBtn.disabled = false;
+                startBtn.textContent = 'Start Download';
+            }
+        });
+
+        clearBtn.addEventListener('click', () => {
+            activeDownloads.forEach((state, urlId) => {
+                if (state.finished || state.statusEl.textContent.startsWith('Error')) {
+                    state.card.remove();
+                    activeDownloads.delete(urlId);
+                }
+            });
+            if (activeDownloads.size === 0 && !progressContainer.querySelector('#empty-state')) {
+                progressContainer.appendChild(emptyState);
+            }
+        });
+    </script>
+</body>
+
+</html>
