@@ -27,24 +27,38 @@ def progress_hook(d, url_id):
     if not url_id:
         return
 
+    # Use the specific video URL for tracking if available, otherwise fallback to the initial URL (playlist or single video)
+    info = d.get('info_dict', {})
+    tracking_id = info.get('webpage_url', url_id)
+
     if d['status'] == 'downloading':
         progress = d.get('_percent_str', '0%').replace('%', '').strip()
-        progress_state[url_id] = {
-            'url_id': url_id,
+        progress_state[tracking_id] = {
+            'url_id': tracking_id,
             'status': 'Downloading',
             'progress': progress,
             'speed': d.get('_speed_str', 'N/A'),
             'eta': d.get('_eta_str', 'N/A'),
-            'title': d.get('info_dict', {}).get('title', 'Unknown')
+            'title': info.get('title', 'Unknown')
         }
+        
+        # If this is a video from a playlist, update the playlist's own progress card
+        if tracking_id != url_id:
+             progress_state[url_id] = {
+                'url_id': url_id,
+                'status': 'Processing Playlist...',
+                'progress': '0',
+                'title': 'Playlist'
+            }
+            
     elif d['status'] == 'finished':
-        progress_state[url_id] = {
-            'url_id': url_id,
+        progress_state[tracking_id] = {
+            'url_id': tracking_id,
             'status': 'Finished',
             'progress': '100',
             'speed': '0',
             'eta': '0',
-            'title': d.get('info_dict', {}).get('title', 'Unknown')
+            'title': info.get('title', 'Unknown')
         }
 
 def run_download(url, format_type, folder, proxy):
@@ -64,7 +78,7 @@ def run_download(url, format_type, folder, proxy):
         'progress_hooks': [hook_wrapper],
         'quiet': True,
         'no_warnings': True,
-        'noplaylist': True,
+        'noplaylist': False,
     }
 
     if proxy:
@@ -87,6 +101,14 @@ def run_download(url, format_type, folder, proxy):
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
+        # Mark the original request as finished
+        if url not in progress_state or progress_state[url]['status'] != 'Finished':
+            progress_state[url] = {
+                'url_id': url,
+                'status': 'Finished',
+                'progress': '100',
+                'title': 'Batch/Playlist Complete'
+            }
     except Exception as e:
         progress_state[url] = {
             'url_id': url,
